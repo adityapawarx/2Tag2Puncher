@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Pipeline outputs and model artifacts (never commit these)
+/data/
+*.jsonl
+links.csv
+output-labels.txt
+*-data.txt
+model_moreGrams/

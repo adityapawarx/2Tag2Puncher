@@ -16,6 +16,7 @@ of their own.
 * [Problem Statement](#problem-statement)
 * [Approach](#approach)
 * [Repository Contents](#repository-contents)
+* [Quick Start](#quick-start)
 * [Pipeline](#pipeline)
 * [Model](#model)
 * [Results](#results)
@@ -50,17 +51,38 @@ at that scale.
 
 ## Repository Contents
 
-| File | Description |
+| Path | Description |
 | --- | --- |
-| `main.ipynb` | The full implementation: data acquisition, preprocessing, training, evaluation, and an interactive "tag your own text" section. |
+| `tagpuncher/` | The pipeline, model and API as an installable package (`tagpuncher` CLI). |
+| `web/` | Next.js demo UI: paste text or upload a paper, see scored tags. |
+| `docs/application.md` | How to install, get a model artifact, serve it and run the UI. |
+| `main.ipynb` | The original research notebook the package was extracted from. |
 | `main_ipynb.pdf` | Static PDF export of the notebook, including saved outputs. |
 | `TagPuncher_Reseach_Paper_on_Reverse_Folksonomy.pdf` | Research paper describing the problem, method, and findings. |
 | `TagPuncher_PPT1_Project_Proposal.pdf` | Initial project proposal deck. |
 | `2Tag2Puncher_PPT2_Update.pdf` | Project update deck. |
 
+## Quick Start
+
+```bash
+pip install -e ".[serve,dev]"
+tagpuncher demo-artifact --output data/artifacts/demo      # tiny placeholder model
+TAGPUNCHER_MODEL_DIR=data/artifacts/demo uvicorn tagpuncher.serve.api:app
+```
+
+```bash
+curl -s localhost:8000/v1/tag -H 'content-type: application/json' \
+  -d '{"text": "an inverted index maps terms to the documents that contain them", "top_k": 3}'
+```
+
+The demo artifact knows six topics and exists only to exercise the stack; train a
+real one with `tagpuncher download && tagpuncher prepare && tagpuncher train`. See
+[`docs/application.md`](docs/application.md) for the API, the UI and deployment notes.
+
 ## Pipeline
 
-`main.ipynb` runs top to bottom in six stages.
+The stages below are implemented in `tagpuncher/` and driven by the `tagpuncher`
+CLI; `main.ipynb` is the original notebook they were extracted from.
 
 ### 1. Data acquisition
 
@@ -121,7 +143,10 @@ producing `training-data.txt`, `testing-data.txt`, `validation-data.txt`, and
 
 ### 5. Training
 
-See [Model](#model).
+`tagpuncher train` — see [Model](#model). The result is a versioned artifact
+directory (preprocessor, XR-Linear model, tag list, manifest) that the API loads
+by path, so promoting a new model is a configuration change rather than a
+redeploy.
 
 ### 6. Evaluation and inference
 
@@ -163,42 +188,45 @@ construction — densely-linked source articles carry far more than 10 gold tags
 ## Getting Started
 
 Read `TagPuncher_Reseach_Paper_on_Reverse_Folksonomy.pdf` first for the motivation and
-method, then work through `main.ipynb`.
-
-The notebook was developed in Google Colab and expects a GPU-less but high-memory runtime
-with substantial disk space (the raw shards are tens of gigabytes).
+method. Training from scratch needs no GPU but does need memory and disk: the raw shards
+are tens of gigabytes, and `kagglehub` requires Kaggle credentials.
 
 ```bash
-pip install scikit-learn scipy==1.9.3 matplotlib orjson kagglehub libpecos pandas numpy tqdm joblib
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[serve,data,dev]"
 ```
-
-Kaggle credentials are required for `kagglehub` to download the dataset.
 
 ## Usage
 
-1. Run the acquisition cells to download the shards into `data/`.
-2. Run the preprocessing cells to produce `links.csv`, the per-split processed CSVs, and
-   the PECOS-format `.txt` files.
-3. Train with `CustomPECOS.train("training-data.txt", "output-labels.txt")` and save the
-   model.
-4. Evaluate on `testing-data.txt` and `validation-data.txt`.
-5. To tag your own text, load a saved model and pass a list of strings:
+```bash
+tagpuncher download                                   # Wikipedia shards -> data/shards
+tagpuncher prepare                                    # vocabulary, splits, PECOS files
+tagpuncher train --version 2026-08-21                 # -> data/artifacts/2026-08-21
+tagpuncher evaluate data/artifacts/2026-08-21 --split testing
+```
+
+To tag text from Python:
 
 ```python
-model = CustomPECOS.load("./model_moreGrams/pecos-CustomPECOS-model")
-Y_pred = model.predict(["your document text here"])
+from tagpuncher.model import TagPuncherModel
+from tagpuncher.serve.inference import TaggingService
 
-for j in range(Y_pred.indptr[0], Y_pred.indptr[1]):
-    print(f"{Y_pred.data[j]:.4f}  {model.output_items[Y_pred.indices[j]]}")
+service = TaggingService(TagPuncherModel.load("data/artifacts/2026-08-21"))
+document = service.tag(open("paper.txt").read(), top_k=10)
+
+for tag in document.tags:
+    print(f"{tag.score:.4f}  {tag.tag}  (chunks {tag.chunks})")
 ```
+
+Long documents are split into ~450-word chunks — the size the model was trained on — and
+each tag keeps the indices of the chunks that produced it.
 
 ## Known Limitations
 
-* Paths in the notebook are a mix of Colab-absolute (`/content/...`) and relative, so some
-  cells need editing to run elsewhere.
-* Cells are not fully order-independent; run the notebook top to bottom.
 * Infobox links are attached to every chunk of an article, adding label noise.
-* Sampling for the qualitative checks is unseeded, so those printed examples vary between
-  runs.
-* There is no `requirements.txt`; dependency versions other than the `scipy` pin required
-  by `libpecos` are unpinned.
+* Scores are uncalibrated: `min_score` thresholds are chosen by feel rather than fitted
+  against a target precision.
+* The model is evaluated on Wikipedia only. Performance on academic PDFs — the intended
+  input — has not been measured, and the domain gap is the largest open risk.
+* `main.ipynb` is kept for provenance and still contains Colab-absolute paths; the package
+  is the maintained implementation.
