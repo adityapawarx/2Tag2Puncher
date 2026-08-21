@@ -42,9 +42,10 @@ def test_tag_chunks_long_documents_and_reports_supporting_chunks(client):
     body = client.post("/v1/tag", json={"text": document, "top_k": 5}).json()
 
     assert len(body["chunks"]) == 2
-    tags = {tag["tag"] for tag in body["tags"]}
-    assert {"Music", "Chemistry"} <= tags
-    assert all(tag["chunks"] for tag in body["tags"])
+    chunks = {tag["tag"]: tag["chunks"] for tag in body["tags"]}
+    assert {"Music", "Chemistry"} <= chunks.keys()
+    assert chunks["Music"] == [0]
+    assert chunks["Chemistry"] == [1]
 
 
 def test_min_score_filters_weak_tags(client):
@@ -63,3 +64,8 @@ def test_tag_document_accepts_plain_text_uploads(client):
     files = {"file": ("paper.txt", b"chemists measured the enthalpy of the reaction", "text/plain")}
     body = client.post("/v1/tag/document", files=files, data={"top_k": 1}).json()
     assert body["tags"][0]["tag"] == "Chemistry"
+
+
+def test_tag_document_rejects_binary_files(client):
+    files = {"file": ("fake.pdf", bytes([0, 159, 146, 150, 255]), "application/pdf")}
+    assert client.post("/v1/tag/document", files=files).status_code == 415

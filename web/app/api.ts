@@ -12,10 +12,24 @@ export type TagResponse = {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+/** FastAPI errors arrive as {"detail": ...}; show the message, not the envelope. */
+async function detailOf(response: Response): Promise<string> {
+  const body = await response.text();
+  try {
+    const detail = (JSON.parse(body) as { detail?: unknown }).detail;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      return detail.map((item) => (item as { msg?: string }).msg ?? "invalid input").join("; ");
+    }
+  } catch {
+    // Not JSON (e.g. a proxy error page) — fall through to the raw body.
+  }
+  return body;
+}
+
 async function parse(response: Response): Promise<TagResponse> {
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `request failed with ${response.status}`);
+    throw new Error((await detailOf(response)) || `request failed with ${response.status}`);
   }
   return (await response.json()) as TagResponse;
 }

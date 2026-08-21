@@ -12,6 +12,11 @@ from dataclasses import dataclass
 
 from .model import ScoredTag
 
+#: A chunk only counts as supporting a tag if it scores at least this fraction of
+#: the tag's best chunk. PECOS returns a score for every requested tag, most of
+#: them ~0, so without this every tag would claim every chunk.
+SUPPORT_RATIO = 0.1
+
 
 @dataclass
 class DocumentTag:
@@ -31,21 +36,27 @@ def aggregate(
     Max rather than sum: summing rewards tags that appear weakly in many chunks,
     which in practice surfaces generic filler tags over the specific ones.
     ``chunks`` records the supporting chunk indices so a UI can highlight the
-    passage a tag came from.
+    passage a tag came from; a chunk supports a tag only if it scores within
+    ``SUPPORT_RATIO`` of that tag's best chunk.
     """
     best: dict[str, float] = {}
-    support: dict[str, list[int]] = defaultdict(list)
+    scores: dict[str, list[tuple[int, float]]] = defaultdict(list)
 
     for index, tags in enumerate(chunk_tags):
         for scored in tags:
-            support[scored.tag].append(index)
+            scores[scored.tag].append((index, scored.score))
             if scored.score > best.get(scored.tag, float("-inf")):
                 best[scored.tag] = scored.score
 
     ranked = [
-        DocumentTag(tag=tag, score=score, chunks=sorted(support[tag]))
+        DocumentTag(tag=tag, score=score, chunks=_support(scores[tag], score))
         for tag, score in best.items()
         if score >= min_score
     ]
     ranked.sort(key=lambda t: (-t.score, t.tag))
     return ranked[:top_k]
+
+
+def _support(chunk_scores: list[tuple[int, float]], best: float) -> list[int]:
+    cutoff = max(best * SUPPORT_RATIO, 1e-9)
+    return sorted(index for index, score in chunk_scores if score >= cutoff)

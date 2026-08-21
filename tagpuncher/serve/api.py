@@ -114,7 +114,14 @@ def create_app(service: TaggingService | None = None) -> FastAPI:
                     status_code=501, detail="PDF support requires the 'serve' extra"
                 ) from error
         else:
-            text = payload.decode("utf-8", errors="replace")
+            # Strict decode: a mislabelled binary would otherwise become mojibake
+            # and get tagged as if it were prose.
+            try:
+                text = payload.decode("utf-8")
+            except UnicodeDecodeError as error:
+                raise HTTPException(
+                    status_code=415, detail="unsupported file type: expected a PDF or UTF-8 text"
+                ) from error
 
         if not text.strip():
             raise HTTPException(status_code=422, detail="no extractable text")
